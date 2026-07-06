@@ -22,12 +22,12 @@ function block_average(data)
     
     # Test block sizes up to N/10
     for B in 1:floor(Int, N/10)
-        n_blocks = N ÷ B
+        n_blocks = N ÷ B # integer division (ignores the reminder) 
         if n_blocks < 5
             break 
         end
         
-        blocks = [mean(data[(i-1)*B+1 : i*B]) for i in 1:n_blocks]
+        blocks = [mean(data[(i-1)*B+1 : i*B]) for i in 1:n_blocks] 
         
         push!(block_sizes, B)
         # Standard error of the block means
@@ -118,11 +118,11 @@ for (i, var_name) in enumerate(var_names)
     stats_nvt = compute_stats(vec_nvt)
     stats_npt = compute_stats(vec_npt)
     
-    is_const_nvt = stats_nvt[2] < 1e-10
+    is_const_nvt = stats_nvt[2] < 1e-10 # std deviation check
     is_const_npt = stats_npt[2] < 1e-10
 
     # --- Terminal Output Comparison ---
-    @printf("%-25s | %-20s | %-20s\n", "Metric", "NVT", "NPT")
+    @printf("%-25s | %-20s | %-20s\n", "Metric", "NVT", "NPT") # % - signals starf of format specifier, - left-align, 25 - column of 25 characters, s - string, .6 - 6 decimal places, f - floating point
     @printf("--------------------------|----------------------|----------------------\n")
     @printf("%-25s | %-20.6f | %-20.6f\n", "Mean", stats_nvt[1], stats_npt[1])
     @printf("%-25s | %-20.6f | %-20.6f\n", "Std Dev", stats_nvt[2], stats_npt[2])
@@ -132,7 +132,7 @@ for (i, var_name) in enumerate(var_names)
     @printf("%-25s | %-20s | %-20s\n", "Est. Error (ACF)", format_val(stats_nvt[11], is_const_nvt), format_val(stats_npt[11], is_const_npt))
     
     # Compare Block Avg vs ACF Methods
-    diff_nvt = is_const_nvt ? "N/A" : @sprintf("%+.6f", stats_nvt[6] - stats_nvt[11])
+    diff_nvt = is_const_nvt ? "N/A" : @sprintf("%+.6f", stats_nvt[6] - stats_nvt[11]) # @printf (Print Format): Formats the text and prints it directly to terminal - does not return any data, @sprintf (String Print Format): Formats the text and returns it as a String variable, without printing it to the screen
     diff_npt = is_const_npt ? "N/A" : @sprintf("%+.6f", stats_npt[6] - stats_npt[11])
     @printf("%-25s | %-20s | %-20s\n", "Diff (Block - ACF)", diff_nvt, diff_npt)
     
@@ -141,8 +141,7 @@ for (i, var_name) in enumerate(var_names)
     @printf("%-25s | %-20s | %-20s\n", "Stat Inefficiency (s)", format_val(stats_nvt[10], is_const_nvt), format_val(stats_npt[10], is_const_npt))
     println()
 
-    # --- Plotting ---
-    p_nvt_block, p_nvt_acf = generate_subplots(stats_nvt[4:5]..., stats_nvt[7:8]..., stats_nvt[3], var_name, "NVT")
+    p_nvt_block, p_nvt_acf = generate_subplots(stats_nvt[4:5]..., stats_nvt[7:8]..., stats_nvt[3], var_name, "NVT") # ... - unpacks the tuple returned by compute_stats into the arguments of generate_subplots, splat operator 
     p_npt_block, p_npt_acf = generate_subplots(stats_npt[4:5]..., stats_npt[7:8]..., stats_npt[3], var_name, "NPT")
     
     # Layout: 2 columns (NVT left, NPT right), 2 rows (Block Avg top, ACF bottom)
@@ -158,4 +157,4 @@ for (i, var_name) in enumerate(var_names)
     savefig(combined_plot, "error_analysis_comparison_$(var_name).png")
 end
 
-# Gemini was so kind to provide the code for plotting and many advices
+# Gemini was so kind as to provide the code for plotting and a lot of advice

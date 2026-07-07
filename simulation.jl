@@ -10,6 +10,7 @@
 # • Variant A: Use the liquid Argon system and compare NVT and NPT results.
 
 # https://github.com/songbin6280/MD_NVT_NH_Python/blob/master/serial_d.py
+# https://github.com/JuliaMolSim/Molly.jl/blob/master/src/simulators.jl
 
 using StaticArrays
 using Random
@@ -109,22 +110,6 @@ function compute_forces_pe_virial(pos, L, rcut)
     return forces, pe, virial
 end
 
-function velocity_verlet(pos, vel, forces, L, dt, rcut)
-    # positions
-    pos = pos .+ vel .* dt .+ 0.5 .* forces .* dt^2
-    
-    # minimum image convention / periodic boundaries - [0, L], to stay within the box
-    pos = [p .- L .* floor.(p ./ L) for p in pos]
-    
-    # new forces, potential energy, and virial with updated positions
-    new_forces, pe, virial = compute_forces_pe_virial(pos, L, rcut)
-    
-    # Update velocities
-    vel = vel .+ 0.5 .* (forces .+ new_forces) .* dt
-    
-    return pos, vel, new_forces, pe, virial
-end
-
 # floor() - rounds down to nearest int
 #ceil() - rounds up to nearest int
 # round() - rounds to nearest int 
@@ -138,73 +123,95 @@ function run_simulation(ensemble::Symbol, params::MDParameters)
     tau_T = params.tau_T
     P_target = params.P_target
 
-    # box length
+    # box lengt h 
     L = (N_atoms / params.rho)^(1/3)
-    
+
     pos = init_positions(N_atoms, L)
     vel = init_velocities(N_atoms, T_target)
+
     forces, current_pe, virial = compute_forces_pe_virial(pos, L, rcut)
 
-    # equilibration - let the system relax and reach the target temperature and pressure before production run
+    current_T = (sum(sum(v.^2) for v in vel) * 2.0) / (3.0 * N_atoms)
+    current_V = L^3
+    current_P = (N_atoms * current_T + virial / 3.0) / current_V
+
     for step in 1:params.eq_steps
-        pos, vel, forces, _, _ = velocity_verlet(pos, vel, forces, L, dt, rcut)
+        # velocity verlet
+        vel .= vel .+ 0.5 .* forces .* dt # half step vel 
+        
+        pos .= pos .+ vel .* dt # full step pos
+        pos .= [p .- L .* floor.(p ./ L) for p in pos]
+        
+        forces, current_pe, virial = compute_forces_pe_virial(pos, L, rcut)
+        
+        vel .= vel .+ 0.5 .* forces .* dt
         
         # Velocity Rescaling - only every 10th step to avoid over-constraining the dynamics but also controlling temperature 
         if step % 10 == 0
-            current_T = sum(sum(v.^2) for v in vel) / (3 * N_atoms)
-            scale_factor = sqrt(T_target / current_T)
-            vel = vel .* scale_factor
+            curr_T = sum(sum(v.^2) for v in vel) / (3 * N_atoms)
+            vel .= vel .* sqrt(T_target / curr_T)
         end
     end
-    
+
     # Nosé-Hoover
-    zeta = 0.0  # Thermostat friction coefficient
-    eta = 0.0   # Barostat volume strain rate
     
-    # Barostat "Mass" (controls how fast the volume responds)
-    W_barostat = 3.0 * N_atoms * T_target * tau_P^2 
-    
-    filename = "argon_data_$(ensemble).txt"
+    zeta = 0.0  # Thermostat friction
+    eta = 0.0   # Barostat strain rate
+    W_barostat = 3.0 * N_atoms * T_target * tau_P^2 # Barostat mass (controls how fast the volume responds)
+
+    filename = "argon_data_$(ensemble)_1.txt"
     open(filename, "w") do io
-        
         println(io, "Step  PE  KE  Total_E  Dist_1_2  Temp  Press  Volume")
         
         for step in 1:params.n_steps
+            #first half-step thermostat/barostat 
+            zeta += (dt / 2.0) * (current_T / T_target - 1.0) / tau_T^2
+            if ensemble == :NPT
+                eta += (dt / 2.0) * current_V * (current_P - P_target) / W_barostat
+            end
+            
+            total_friction = ensemble == :NPT ? (zeta + eta) : zeta
+            vel .= vel .* exp(-total_friction * (dt / 2.0))
 
+            # first half-step velocity 
+            vel .= vel .+ 0.5 .* forces .* dt
+
+            # full step pos 
             if ensemble == :NPT
                 scale_factor = exp(eta * dt)
                 L *= scale_factor
-                pos = pos .* scale_factor
+                pos .= pos .* scale_factor
             end
-
-            pos, vel, forces, current_pe, virial = velocity_verlet(pos, vel, forces, L, dt, rcut)
             
+            pos .= pos .+ vel .* dt
+            pos .= [p .- L .* floor.(p ./ L) for p in pos] # Minimum image
+
+            forces, current_pe, virial = compute_forces_pe_virial(pos, L, rcut)
+
+            # second half-step velocity 
+            vel .= vel .+ 0.5 .* forces .* dt
+
+            # second half-step thermostat/barostat
+            # Re-calculate intermediate properties for the second friction update
             current_ke = 0.5 * sum(sum(v.^2) for v in vel)
-            current_te = current_pe + current_ke
             current_T = (2.0 * current_ke) / (3.0 * N_atoms)
             current_V = L^3
             current_P = (N_atoms * current_T + virial / 3.0) / current_V
+
+            vel .= vel .* exp(-total_friction * (dt / 2.0))
             
-            # Distance between atom 1 and 2 (minimum)
+            zeta += (dt / 2.0) * (current_T / T_target - 1.0) / tau_T^2
+            if ensemble == :NPT
+                eta += (dt / 2.0) * current_V * (current_P - P_target) / W_barostat
+            end
+
+            current_te = current_pe + current_ke
+            
+            # distance between 2 atoms (minimum image) 
             r12 = pos[1] .- pos[2]
             r12 = r12 .- L .* round.(r12 ./ L)
             dist_12 = sqrt(sum(r12.^2))
 
-            # Nosé-Hoover Integration
-            zeta += dt * (current_T / T_target - 1.0) / tau_T^2 # thermostat update 
-            
-            if ensemble == :NPT
-                eta += dt * current_V * (current_P - P_target) / W_barostat # barostat update
-            end
-            
-            # Apply Friction to Velocities
-            # eta is added because an expanding box cools the system, and a shrinking box heats it
-            total_friction = zeta
-            if ensemble == :NPT
-                total_friction += eta
-            end
-            vel = vel .* exp(-total_friction * dt)
-            
             @printf(io, "%d  %.4f  %.4f  %.4f  %.4f  %.4f  %.4f  %.4f\n", 
                     step, current_pe, current_ke, current_te, dist_12, current_T, current_P, current_V)
         end

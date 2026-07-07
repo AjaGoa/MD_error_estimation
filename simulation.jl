@@ -159,7 +159,7 @@ function run_simulation(ensemble::Symbol, params::MDParameters)
     eta = 0.0   # Barostat strain rate
     W_barostat = 3.0 * N_atoms * T_target * tau_P^2 # Barostat mass (controls how fast the volume responds)
 
-    filename = "argon_data_$(ensemble)_1.txt"
+    filename = "argon_data_$(ensemble).txt"
     open(filename, "w") do io
         println(io, "Step  PE  KE  Total_E  Dist_1_2  Temp  Press  Volume")
         

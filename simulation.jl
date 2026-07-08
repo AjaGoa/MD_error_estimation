@@ -222,3 +222,5 @@ params = init_parameters()
 # @time
 run_simulation(:NVT, params)
 run_simulation(:NPT, params)
+
+# potentially check that the simulation and thermostat is correct ? 

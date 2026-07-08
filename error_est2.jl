@@ -190,85 +190,6 @@ function process_ensemble(filename, ensemble_name, col_names, col_indices)
     end
 end
 
-
-# Will be fixed soon :)
-# define the radial distribution function as the ratio of the average local number density of particles at a distance to the bulk density of particles
-# https://chem.libretexts.org/Bookshelves/Biological_Chemistry/Concepts_in_Biophysical_Chemistry_(Tokmakoff)/01%3A_Water_and_Aqueous_Solutions/01%3A_Fluids/1.02%3A_Radial_Distribution_Function
-
-# so far gemini suggestion: 
-# function rdf(traj_path, ensemble_name; rmax=15.0, bins=150)    
-#     println(" RDF: $ensemble_name (File: $traj_path)")
-    
-#     traj = Trajectory(traj_path) # https://chemfiles.org/Chemfiles.jl/latest/reference/trajectory/#Trajectory
-#     n_frames = length(traj)
-    
-#     dr = rmax / bins
-#     hist = zeros(Float64, bins)
-    
-#     total_volume = 0.0
-#     n_atoms = 0
-    
-#     for step in 0:(n_frames-1)
-#         if step % max(1, n_frames÷20) == 0; print("="); end
-        
-#         frame = read_step(traj, step) 
-#         pos = positions(frame) # 3 x N matrix
-#         n_atoms = size(pos, 2)
-        
-#         cell = UnitCell(frame)
-#         L = lengths(cell)
-#         total_volume += volume(cell)
-        
-#         # Calculate Pairwise Distances (Minimum Image Convention)
-#         for i in 1:(n_atoms-1)
-#             for j in (i+1):n_atoms
-#                 dx = pos[1, i] - pos[1, j]
-#                 dy = pos[2, i] - pos[2, j]
-#                 dz = pos[3, i] - pos[3, j]
-                
-#                 # Apply periodic boundaries
-#                 dx -= L[1] * round(dx / L[1])
-#                 dy -= L[2] * round(dy / L[2])
-#                 dz -= L[3] * round(dz / L[3])
-                
-#                 r = sqrt(dx^2 + dy^2 + dz^2)
-                
-#                 if r < rmax
-#                     bin_idx = floor(Int, r / dr) + 1
-#                     if bin_idx <= bins
-#                         hist[bin_idx] += 2.0 
-#                     end
-#                 end
-#             end
-#         end
-#     end
-#     close(traj)
-    
-#     avg_volume = total_volume / n_frames
-#     rho = n_atoms / avg_volume
-    
-#     r_vals = zeros(Float64, bins)
-#     g_r = zeros(Float64, bins)
-    
-#     for b in 1:bins
-#         r_lower = (b - 1) * dr
-#         r_upper = b * dr
-#         r_vals[b] = r_lower + dr / 2.0
-        
-#         v_shell = (4.0 / 3.0) * π * (r_upper^3 - r_lower^3)
-#         ideal_count = rho * v_shell
-        
-#         g_r[b] = hist[b] / (n_frames * n_atoms * ideal_count)
-#     end
-    
-#     p = plot(r_vals, g_r, title="Argon RDF ($ensemble_name)", 
-#              xlabel="Distance r (Å)", ylabel="g(r)", linewidth=2, label="g(r)", legend=:topright)
-#     hline!(p, [1.0], linestyle=:dash, color=:black, label="")
-    
-#     plot_filename = "analysis_RDF_$(ensemble_name).png"
-#     savefig(p, plot_filename)
-# end
-
 # NVT
 col_names_nvt = ["Temperature", "Kinetic_Energy", "Potential_Energy", "Conserved_Energy", "Pressure"]
 col_indices_nvt = [3, 4, 5, 6, 7]
@@ -278,6 +199,3 @@ process_ensemble("energy_NVT.txt", "NVT", col_names_nvt, col_indices_nvt)
 col_names_npt = ["Temperature", "Kinetic_Energy", "Potential_Energy", "Conserved_Energy", "Pressure", "Density"]
 col_indices_npt = [3, 4, 5, 6, 7, 8]
 process_ensemble("energy_NpT.txt", "NpT", col_names_npt, col_indices_npt)
-
-#rdf("positions_NVT.dcd", "NVT", rmax=15.0, bins=150)
-#rdf("positions_NpT.dcd", "NpT", rmax=15.0, bins=150)

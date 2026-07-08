@@ -87,6 +87,33 @@ function format_val(val, is_constant)
     return is_constant ? "Constant" : @sprintf("%.6f", val)
 end
 
+function calculate_cv(variance_PE::Float64, T_mean::Float64)
+    R = 0.0019872041 # gas constant kcal/(mol K)
+    Cv_excess = variance_PE / (R * T_mean^2)
+    #Cv_ideal = 1.5 * R # Monoatomic 3D ideal gas contribution
+    #Cv_total = Cv_excess + Cv_ideal
+    
+    return Cv_excess # , Cv_total
+end
+
+function calculate_cp(E_pot::Vector{Float64}, E_kin::Vector{Float64}, Press::Vector{Float64}, Dens::Vector{Float64}, T_mean::Float64; N_atoms=2048, molar_mass=39.948)
+    N_A = 6.02214076e23 # Avogadro's number
+    mass_g = (N_atoms * molar_mass) / N_A
+    
+    # V (cm^3) = mass / density -> Convert to A^3 (* 1e24)
+    Vol_A3 = (mass_g ./ Dens) .* 1e24
+    
+    # Enthalpy H = E + PV (Conversion 1 atm * A^3 = 0.0145839 kcal/mol)
+    PV_kcal = Press .* Vol_A3 .* 0.0145839
+    H = E_pot .+ E_kin .+ PV_kcal
+    
+    R = 0.0019872041 # kcal/(mol K)
+    variance_H = var(H)
+    Cp_total = variance_H / (R * T_mean^2)
+    
+    return Cp_total
+end
+
 function process_ensemble(filename, ensemble_name, col_names, col_indices)
     println(" Ensemble: $ensemble_name (File: $filename)")
     
@@ -119,15 +146,12 @@ function process_ensemble(filename, ensemble_name, col_names, col_indices)
         # C_v
         if name == "Potential_Energy" && ensemble_name == "NVT"
             # Δ E = \sqrt (Cpk_b T^2)
-            R = 0.0019872041 # gas constant kcal/(mol K)
             variance_PE = stats[2]^2
-            Cv_total = variance_PE / (R * T_mean^2)
-            #Cv_ideal = 1.5 * R # Cv = d/2 * R (d = 3 for 3D - degrees of freedom)
-            #Cv_total = Cv_excess + Cv_ideal # ! asi jsem pro to nenasla dostatecny reasoning ? Nekde v Theory of Simple Liquids, Hansen a McDonald ? 
-            
-            println("\n Heat Capacity (Cv):")
-            #@printf("  Cv (excess) = %.6f kcal/(mol K)\n", Cv_excess)
-            @printf("  Cv (total)  = %.6f kcal/(mol K)\n", Cv_total)
+            Cv_excess = calculate_cv(variance_PE, T_mean)  / 2.048 # per atom and convert to cal/mol K, because E pot is sum over the whole box
+            # Cv_total ? 
+            println("\n Heat Capacity (Cv) per atom:")
+            @printf("  Cv (excess) = %.6f cal/(mol K)\n", Cv_excess)
+            #@printf("  Cv (total)  = %.6f kcal/(mol K)\n", Cv_total)
         end
         
         # C_p
@@ -142,25 +166,9 @@ function process_ensemble(filename, ensemble_name, col_names, col_indices)
             Press = convert(Vector{Float64}, raw_data[:, idx_p])
             Dens  = convert(Vector{Float64}, raw_data[:, idx_dens])
             
-            N_atoms = 2048 # tohle by mozna chtelo definovat jinde
-            molar_mass = 39.948 
-            N_A = 6.02214076e23 # Avogadro's number
-            mass_g = (N_atoms * molar_mass) / N_A
-            
-            # V (cm^3) = mass / density -> Convert to A^3 (* 1e24) - 1 cm = 10^8 A 
-            Vol_A3 = (mass_g ./ Dens) .* 1e24
-            
-            # Enthalpy H = E + PV
-            # Conversion 1 atm * A^3 = 0.0145839 kcal/mol
-            PV_kcal = Press .* Vol_A3 .* 0.0145839
-            H = E_pot .+ E_kin .+ PV_kcal
-            
-            R = 0.0019872041 # kcal/(mol K)
-            variance_H = var(H) # var() from Statistics
-            Cp_total = variance_H / (R * T_mean^2)
-            
+            Cp_total = calculate_cp(E_pot, E_kin, Press, Dens, T_mean) / 2.048
             println("\n Isobaric Heat Capacity (Cp):")
-            @printf("  Cp (total)  = %.6f kcal/(mol K)\n", Cp_total)
+            @printf("  Cp (total)  = %.6f cal/(mol K)\n", Cp_total)
         end
 
         if !is_const
@@ -184,78 +192,82 @@ end
 
 
 # Will be fixed soon :)
-function rdf(traj_path, ensemble_name; rmax=15.0, bins=150)    
-    println(" RDF: $ensemble_name (File: $traj_path)")
+# define the radial distribution function as the ratio of the average local number density of particles at a distance to the bulk density of particles
+# https://chem.libretexts.org/Bookshelves/Biological_Chemistry/Concepts_in_Biophysical_Chemistry_(Tokmakoff)/01%3A_Water_and_Aqueous_Solutions/01%3A_Fluids/1.02%3A_Radial_Distribution_Function
+
+# so far gemini suggestion: 
+# function rdf(traj_path, ensemble_name; rmax=15.0, bins=150)    
+#     println(" RDF: $ensemble_name (File: $traj_path)")
     
-    traj = Trajectory(traj_path) # https://chemfiles.org/Chemfiles.jl/latest/reference/trajectory/#Trajectory
-    n_frames = length(traj)
+#     traj = Trajectory(traj_path) # https://chemfiles.org/Chemfiles.jl/latest/reference/trajectory/#Trajectory
+#     n_frames = length(traj)
     
-    dr = rmax / bins
-    hist = zeros(Float64, bins)
+#     dr = rmax / bins
+#     hist = zeros(Float64, bins)
     
-    total_volume = 0.0
-    n_atoms = 0
+#     total_volume = 0.0
+#     n_atoms = 0
     
-    for step in 0:(n_frames-1)
-        if step % max(1, n_frames÷20) == 0; print("="); end
+#     for step in 0:(n_frames-1)
+#         if step % max(1, n_frames÷20) == 0; print("="); end
         
-        frame = read_step(traj, step) 
-        pos = positions(frame) # 3 x N matrix
-        n_atoms = size(pos, 2)
+#         frame = read_step(traj, step) 
+#         pos = positions(frame) # 3 x N matrix
+#         n_atoms = size(pos, 2)
         
-        cell = UnitCell(frame)
-        L = lengths(cell)
-        total_volume += volume(cell)
+#         cell = UnitCell(frame)
+#         L = lengths(cell)
+#         total_volume += volume(cell)
         
-        # Calculate Pairwise Distances (Minimum Image Convention)
-        for i in 1:(n_atoms-1)
-            for j in (i+1):n_atoms
-                dx = pos[1, i] - pos[1, j]
-                dy = pos[2, i] - pos[2, j]
-                dz = pos[3, i] - pos[3, j]
+#         # Calculate Pairwise Distances (Minimum Image Convention)
+#         for i in 1:(n_atoms-1)
+#             for j in (i+1):n_atoms
+#                 dx = pos[1, i] - pos[1, j]
+#                 dy = pos[2, i] - pos[2, j]
+#                 dz = pos[3, i] - pos[3, j]
                 
-                # Apply periodic boundaries
-                dx -= L[1] * round(dx / L[1])
-                dy -= L[2] * round(dy / L[2])
-                dz -= L[3] * round(dz / L[3])
+#                 # Apply periodic boundaries
+#                 dx -= L[1] * round(dx / L[1])
+#                 dy -= L[2] * round(dy / L[2])
+#                 dz -= L[3] * round(dz / L[3])
                 
-                r = sqrt(dx^2 + dy^2 + dz^2)
+#                 r = sqrt(dx^2 + dy^2 + dz^2)
                 
-                if r < rmax
-                    bin_idx = floor(Int, r / dr) + 1
-                    if bin_idx <= bins
-                        hist[bin_idx] += 2.0 
-                    end
-                end
-            end
-        end
-    end
-    close(traj)
+#                 if r < rmax
+#                     bin_idx = floor(Int, r / dr) + 1
+#                     if bin_idx <= bins
+#                         hist[bin_idx] += 2.0 
+#                     end
+#                 end
+#             end
+#         end
+#     end
+#     close(traj)
     
-    avg_volume = total_volume / n_frames
-    rho = n_atoms / avg_volume
+#     avg_volume = total_volume / n_frames
+#     rho = n_atoms / avg_volume
     
-    r_vals = zeros(Float64, bins)
-    g_r = zeros(Float64, bins)
+#     r_vals = zeros(Float64, bins)
+#     g_r = zeros(Float64, bins)
     
-    for b in 1:bins
-        r_lower = (b - 1) * dr
-        r_upper = b * dr
-        r_vals[b] = r_lower + dr / 2.0
+#     for b in 1:bins
+#         r_lower = (b - 1) * dr
+#         r_upper = b * dr
+#         r_vals[b] = r_lower + dr / 2.0
         
-        v_shell = (4.0 / 3.0) * π * (r_upper^3 - r_lower^3)
-        ideal_count = rho * v_shell
+#         v_shell = (4.0 / 3.0) * π * (r_upper^3 - r_lower^3)
+#         ideal_count = rho * v_shell
         
-        g_r[b] = hist[b] / (n_frames * n_atoms * ideal_count)
-    end
+#         g_r[b] = hist[b] / (n_frames * n_atoms * ideal_count)
+#     end
     
-    p = plot(r_vals, g_r, title="Argon RDF ($ensemble_name)", 
-             xlabel="Distance r (Å)", ylabel="g(r)", linewidth=2, label="g(r)", legend=:topright)
-    hline!(p, [1.0], linestyle=:dash, color=:black, label="")
+#     p = plot(r_vals, g_r, title="Argon RDF ($ensemble_name)", 
+#              xlabel="Distance r (Å)", ylabel="g(r)", linewidth=2, label="g(r)", legend=:topright)
+#     hline!(p, [1.0], linestyle=:dash, color=:black, label="")
     
-    plot_filename = "analysis_RDF_$(ensemble_name).png"
-    savefig(p, plot_filename)
-end
+#     plot_filename = "analysis_RDF_$(ensemble_name).png"
+#     savefig(p, plot_filename)
+# end
 
 # NVT
 col_names_nvt = ["Temperature", "Kinetic_Energy", "Potential_Energy", "Conserved_Energy", "Pressure"]
@@ -267,5 +279,5 @@ col_names_npt = ["Temperature", "Kinetic_Energy", "Potential_Energy", "Conserved
 col_indices_npt = [3, 4, 5, 6, 7, 8]
 process_ensemble("energy_NpT.txt", "NpT", col_names_npt, col_indices_npt)
 
-rdf("positions_NVT.dcd", "NVT", rmax=15.0, bins=150)
-rdf("positions_NpT.dcd", "NpT", rmax=15.0, bins=150)
+#rdf("positions_NVT.dcd", "NVT", rmax=15.0, bins=150)
+#rdf("positions_NpT.dcd", "NpT", rmax=15.0, bins=150)

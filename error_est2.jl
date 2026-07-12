@@ -30,7 +30,7 @@ function autocorrelation(data::Vector{Float64}, max_lag::Int)
     N = length(data)
     x = data .- mean(data)
     
-    # fft runs faster when array length is power of 2, 2N - 1 is minimum length
+    # fft runs faster when array length is power of 2, 2N - 1 is minimum length 
     buffer_length = nextpow(2, 2N - 1) # nextpow(a, x) - The smallest a^n not less than x, where n is a non-negative integer. a must be greater than 1, and x must be greater than 0
     buffer_x = zeros(Float64, buffer_length)
     buffer_x[1:N] .= x
@@ -39,11 +39,13 @@ function autocorrelation(data::Vector{Float64}, max_lag::Int)
     S = abs2.(F) 
     R = real.(ifft(S)) # still need real. after abs2 because of the floating point errors in IFFT
     
-    acf = R[1:N]
+    acf = R[1:N] # < - je to R ofsetnute ? ma to byt od 0 nebo 1:N? 
     lags = 0:(N-1)
     acf ./= (N .- lags) # N - k normalization 
     acf ./= acf[1] # normalize to C(0) = 1.0 
-    
+    # zkontrolovat normalizaci - je nulovy posun na indexu 0 nebo 1 ? prohlidnout si nejdriv jak vypada cela acf, a pak az ji normalizovat a rezat
+    # fftfreq - neco uvidim :)
+
     return acf[1:max_lag+1] # max_lag is N/5 - after this acf is too noisy - so not include the rest - and + 1 is because of the 0 lag (to get the acf(max_lag) instead of acf(max_lag-1))
 end
 
@@ -87,9 +89,10 @@ function format_val(val, is_constant)
     return is_constant ? "Constant" : @sprintf("%.6f", val)
 end
 
+# Tuckerman 4.5 
 function calculate_cv(variance_PE::Float64, T_mean::Float64)
     R = 0.0019872041 # gas constant kcal/(mol K)
-    Cv_excess = variance_PE / (R * T_mean^2)
+    Cv_excess = variance_PE / (R * T_mean^2) # tady by mela byt celkova, mozna celkova teplota ensamplu misto T_mean? 
     #Cv_ideal = 1.5 * R # Monoatomic 3D ideal gas contribution
     #Cv_total = Cv_excess + Cv_ideal
     

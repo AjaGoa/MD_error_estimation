@@ -63,11 +63,13 @@ end
 function init_velocities(N, T)
     vel = [SVector{3, Float64}(randn(), randn(), randn()) for _ in 1:N]
     
-    v_cm = sum(vel) ./ N 
-    vel = [v .- v_cm for v in vel] # subtract center-of-mass velocity to ensure zero net momentum
-    
+    # v_cm = sum(vel) ./ N 
+    # vel = [v .- v_cm for v in vel] # subtract center-of-mass velocity to ensure zero net momentum
+    # neni potreba 
+
     current_T = sum(sum(v.^2) for v in vel) / (3 * N)  # from equipartition theorem KE = (3/2) * N * k_B * T, and KE = (1/2) * m * sum(v^2), so T = (2/3N) * KE in reduced units
     scale_factor = sqrt(T / current_T) 
+    # staci spocitat sca_factor a vynasobit ty teploty
     return [v .* scale_factor for v in vel]
 end
 

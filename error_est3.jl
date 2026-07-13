@@ -10,6 +10,8 @@ using LsqFit
 # Tuckerman - L 13.4
 # Error estimates on averages of correlated data - H. Flyvbjerg and H. G. Petersen
 # FP .py  : https://github.com/rsdefever/block_average/blob/master/block_average/block_average.py
+# https://github.com/choderalab/pymbar/blob/main/pymbar/timeseries.py
+# Allen, M. P., & Tildesley, D. J. — Computer Simulation of Liquids - Ch 6.4 - statistical inefficiency
 
 function block_average(data)
     N = length(data)
@@ -29,8 +31,7 @@ end
 error_asymptote_model(x, p) = p[1] .- p[2] .* exp.(-p[3] .* x)
 
 function get_asymptotic_error(sizes::Vector{Int}, errors::Vector{Float64}, N_total::Int)
-    # Calculate weights based on the number of blocks. 
-    # More blocks = less noise = higher weight in the fit.
+    # weight - More blocks = less noise = higher weight in the fit.
     n_blocks = N_total ./ sizes
     weights = n_blocks ./ sum(n_blocks) 
     
@@ -39,14 +40,11 @@ function get_asymptotic_error(sizes::Vector{Int}, errors::Vector{Float64}, N_tot
     min_err = minimum(errors)
     p0 = [max_err, max_err - min_err, 0.05] 
     
-    # Perform the weighted curve fit
     fit = curve_fit(error_asymptote_model, Float64.(sizes), errors, weights, p0)
     
-    # Extract the optimized parameters
     p_opt = fit.param
     true_error_estimate = p_opt[1]
     
-    # Generate the fitted curve for plotting purposes
     fit_curve = error_asymptote_model(Float64.(sizes), p_opt)
     
     return true_error_estimate, fit_curve
@@ -68,14 +66,13 @@ function block_average_fp(data::Vector{Float64})
         var_mean = var(data) / n_blocks
         err = sqrt(var_mean)
         
-        # Flyvbjerg-Petersen Error of the Error (Eq. 28 in the paper)
+        # Flyvbjerg-Petersen Error of the Error
         err_of_err = err / sqrt(2 * (n_blocks - 1))
         
         push!(block_sizes, current_B)
         push!(block_errors, err)
         push!(error_of_errors, err_of_err)
         
-        # Transform data: halve the size by averaging adjacent pairs (Eq. 20)
         new_n_blocks = n_blocks ÷ 2
         new_data = zeros(Float64, new_n_blocks)
         for i in 1:new_n_blocks
@@ -89,45 +86,27 @@ function block_average_fp(data::Vector{Float64})
     return block_sizes, block_errors, error_of_errors
 end
 
-function identify_plateau(block_sizes, error_block, error_of_errors, N; min_blocks=5, window=2)
-    optimal_error = error_block[1]
-    optimal_size = block_sizes[1]
-    plateau_found = false
-
-    for i in 1:length(error_block)
-        n_blocks = N ÷ block_sizes[i]
+# inspo: https://github.com/rsdefever/block_average/blob/master/block_average/block_average.py
+function identify_plateau(block_sizes, error_block, error_of_errors)
+    n = length(error_block)
+    
+    for i in 1:n
+        # check difference with highest and lowest error of errors value
+        max_lower = maximum(error_block[j] - error_of_errors[j] for j in i:n)
+        min_upper = minimum(error_block[j] + error_of_errors[j] for j in i:n)
         
-        if n_blocks < min_blocks
-            if !plateau_found
-                println(" Minimum block limit ($min_blocks) reached before finding a stable plateau.")
-                safe_idx = max(1, i - 1)
-                optimal_error = error_block[safe_idx]
-                optimal_size = block_sizes[safe_idx]
+        # Check if the current point intersects all remaining error bars
+        if error_block[i] > max_lower && error_block[i] < min_upper
+            if i == n
+                println("uncertainty estimate did not plateau before the end of the sample.")
             end
-            break
-        end
-
-        # Look-ahead window: check if the curve has flattened out
-        is_plateau = true
-        for j in 1:window
-            if (i + j) <= length(error_block)
-                # If the subsequent point falls OUTSIDE the current point's error bar
-                if abs(error_block[i+j] - error_block[i]) > error_of_errors[i]
-                    is_plateau = false
-                    break
-                end
-            end
-        end
-
-        if is_plateau
-            optimal_error = error_block[i]
-            optimal_size = block_sizes[i]
-            plateau_found = true
-            break
+            return error_block[i], block_sizes[i], true 
         end
     end
     
-    return optimal_error, optimal_size, plateau_found
+    println("No stable global plateau found. Falling back to maximum error.")
+    max_idx = argmax(error_block)
+    return error_block[max_idx], block_sizes[max_idx], false
 end
 
 function autocorrelation(data::Vector{Float64}, mean_shifted=true)
@@ -195,10 +174,9 @@ function calculate_cp(E_pot::Vector{Float64}, E_kin::Vector{Float64}, Press::Vec
     return Cp_total
 end
 
-
-function run_block_averaging(data::Vector{Float64}, N_total::Int; min_blocks=5, window=2)
+function run_block_averaging(data::Vector{Float64}, N_total::Int)
     block_sizes_fp, error_block_fp, error_of_errors_fp  = block_average_fp(data)
-    optimal_error_fp, optimal_size_fp, plateau_found_fp = identify_plateau(block_sizes_fp, error_block_fp, error_of_errors_fp, N_total; min_blocks=min_blocks, window=window)
+    optimal_error_fp, optimal_size_fp, plateau_found_fp = identify_plateau(block_sizes_fp, error_block_fp, error_of_errors_fp)
     
     block_sizes_blockAvg, block_errors_blockAvg = block_average(data)
     true_error_estimate_blockAvg, fit_curve_blockAvg = get_asymptotic_error(block_sizes_blockAvg, block_errors_blockAvg, N_total)
@@ -214,7 +192,7 @@ function run_acf(data::Vector{Float64})
 end
 
 function calc_error_acf(tau, N, σ)
-    s = max(1.0, 1 + 2 * tau) 
+    s = max(1.0, 1 + 2 * tau)  # sem by mela prijit ( 1 - t/N) prakticky jako vaha ? <-- pymbar
     return σ * sqrt(s / N)
 end
 
@@ -240,7 +218,6 @@ function compute_stats(data, block::NamedTuple, acf::NamedTuple)
     acf_abs_diff = abs.(acf.acf .- acf.acf_loop)
     acf_max_abs_diff = maximum( acf_abs_diff)
     
-
     # Block
     tau_block = 0.5 * ((block.true_error_estimate_blockAvg / naive_error)^2 - 1.0) # TODO ozdrojovat - Extract: $\tau = 0.5 \left( \left( \frac{\epsilon_{block}}{\epsilon_{naive}} \right)^2 - 1 \right)$Recalculate: $\epsilon_{recalc} = \epsilon_{naive} \sqrt{1 + 2\tau}$
     error_tau_block = calc_error_acf(tau_block, N, σ)
@@ -270,7 +247,7 @@ function compare_methods(data::Vector{Float64}, ensemble_name::String, name::Str
     
     methods = [
         ("Naive (σ/√N)", stats.naive_error),
-        ("Block (fit)",  block_avg.true_error_estimate_blockAvg), # ! Tady mi chybi vstup ve stats. - nemam tam chyby z bloku
+        ("Block (fit)",  block_avg.true_error_estimate_blockAvg),
         ("Block (FP)",   block_avg.optimal_error_fp),
         ("Block (fit) from τ", stats.error_tau_block),
         ("Block (FP) from τ", stats.error_tau_block_fp),
@@ -327,13 +304,12 @@ function process_ensemble(filename, ensemble_name, col_names, col_indices, dt)
         vec_data = convert(Vector{Float64}, raw_data[:, idx])
         N = length(vec_data)
 
-        acf_tuple = run_acf(vec_data) # Tady mi asi chybi N_total definovane ?? 
+        acf_tuple = run_acf(vec_data)  
         block_tuple = run_block_averaging(vec_data, N)
 
         stats = compute_stats(vec_data, block_tuple, acf_tuple)
         compare_methods(vec_data, ensemble_name, name, stats, block_tuple, dt)
 
-        # TODO printing
         plotting(N, ensemble_name, name, dt, block_tuple, acf_tuple, stats)
     end
 end
@@ -380,3 +356,17 @@ process_ensemble("energy_NVT.txt", "NVT", col_names_nvt, col_indices_nvt, dt)
 col_names_npt = ["Temperature", "Kinetic_Energy", "Potential_Energy", "Conserved_Energy", "Pressure", "Density"]
 col_indices_npt = [3, 4, 5, 6, 7, 8]
 process_ensemble("energy_NpT.txt", "NpT", col_names_npt, col_indices_npt, dt)
+
+#= 
+- chybi porovnani τ ? 
+- acf potrebuje nekde uriznout na pocitani chyby - mozna vyresi vaga? (pymbar)
+- nejak upravit ten bar graf tech chyb 
+- udelat for loop for calc_error ..() 
+- prohlednout jestli vracim a davam jenom potrebne promenne 
+- init struktura z parametru simulace ? 
+- jeste mozna prodlouzit simulaci ? 
+- bylo by fajn jeste udelat porovnani chyb u stejne metody ale jineho dohadu chyb 
+- asi se zbavit FP metody, protoze na tu asi nemam dost dlouhe data 
+- chybi porovnani NVT a NpT souboru 
+- chybi analyza chyby a pocitani heat capacity
+=# 
